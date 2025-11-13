@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: admin_portal_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${DB_NAME:-admin_portal_dev}
+      MYSQL_USER: ${DB_USER:-appuser}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-apppassword}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./migrations:/docker-entrypoint-initdb.d
+    networks:
+      - admin_portal_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: admin_portal_api
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-appuser}
+      - DB_PASSWORD=${DB_PASSWORD:-apppassword}
+      - DB_NAME=${DB_NAME:-admin_portal_dev}
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./app:/app/app
+      - ./migrations:/app/migrations
+    networks:
+      - admin_portal_network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Optional: phpMyAdmin for database management (development only)
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: admin_portal_phpmyadmin
+    restart: unless-stopped
+    depends_on:
+      - mysql
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: ${DB_USER:-appuser}
+      PMA_PASSWORD: ${DB_PASSWORD:-apppassword}
+    ports:
+      - "8080:80"
+    networks:
+      - admin_portal_network
+    profiles:
+      - dev  # Only start with: docker-compose --profile dev up
+
+volumes:
+  mysql_data:
+    driver: local
+
+networks:
+  admin_portal_network:
+    driver: bridge
